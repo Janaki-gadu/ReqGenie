@@ -1,0 +1,68 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Button } from "@/components/ui/button";
+import { Mic, MicOff } from "lucide-react";
+
+export default function VoiceInput({ onTranscript, isRecording, setIsRecording }) {
+  const [isSupported, setIsSupported] = useState(false);
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      setIsSupported(true);
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
+      
+      recognitionRef.current.onresult = (event) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          onTranscript(finalTranscript);
+          setIsRecording(false);
+        }
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsRecording(false);
+      };
+    }
+  }, [onTranscript, setIsRecording]);
+
+  const toggleRecording = () => {
+    if (!isSupported) return;
+
+    if (isRecording) {
+      recognitionRef.current.stop();
+    } else {
+      recognitionRef.current.start();
+      setIsRecording(true);
+    }
+  };
+
+  if (!isSupported) {
+    return (
+      <Button variant="outline" disabled className="text-slate-400">
+        <MicOff className="w-4 h-4" />
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant={isRecording ? "default" : "outline"}
+      onClick={toggleRecording}
+      className={`${isRecording ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'hover:bg-slate-50'}`}
+    >
+ 
