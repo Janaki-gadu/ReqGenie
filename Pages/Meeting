@@ -1,0 +1,351 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Project } from "@/entities/Project";
+import { Requirement } from "@/entities/Requirement";
+import { InvokeLLM } from "@/integrations/Core";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { 
+  Mic, 
+  MicOff, 
+  Send, 
+  Bot, 
+  User, 
+  Sparkles,
+  Volume2,
+  VolumeX,
+  Settings
+} from "lucide-react";
+
+import VoiceInput from "../components/meeting/VoiceInput";
+import ChatInterface from "../components/meeting/ChatInterface";
+import RequirementCapture from "../components/meeting/RequirementCapture";
+import AgentStatus from "../components/meeting/AgentStatus";
+
+export default function Meeting() {
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [projects, setProjects] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [currentInput, setCurrentInput] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [activeAgent, setActiveAgent] = useState("collector");
+  const [sessionStarted, setSessionStarted] = useState(false);
+
+  useEffect(() => {
+    loadProjects();
+    initializeSession();
+  }, []);
+
+  const loadProjects = async () => {
+    const projectsData = await Project.list("-updated_date");
+    setProjects(projectsData);
+    
+    // Check if project ID is in URL params
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectId = urlParams.get('project');
+    if (projectId) {
+      const project = projectsData.find(p => p.id === projectId);
+      if (project) {
+        setSelectedProject(project);
+      }
+    }
+  };
+
+  const initializeSession = () => {
+    setMessages([{
+      id: 1,
+      type: "ai",
+      agent: "collector",
+      content: "Welcome to your virtual requirements gathering session! I'm your AI Collector agent. I'll help capture, clarify, and validate your requirements. Select a project to begin, or tell me about your new project requirements.",
+      timestamp: new Date()
+    }]);
+  };
+
+  const startSession = async () => {
+    if (!selectedProject) return;
+    
+    setSessionStarted(true);
+    const welcomeMessage = {
+      id: Date.now(),
+      type: "ai",
+      agent: "collector",
+      content: `Perfect! Let's gather requirements for "${selectedProject.name}". You can speak naturally, type, or describe your needs in any way. I'll ask clarifying questions to ensure we capture everything accurately. What would you like to start with?`,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, welcomeMessage]);
+  };
+
+  const processUserInput = async (input) => {
+    if (!input.trim()) return;
+
+    // Add user message
+    const userMessage = {
+      id: Date.now(),
+      type: "user",
+      content: input,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setCurrentInput("");
+    setIsProcessing(true);
+
+    try {
+      // Determine which agent should respond based on context
+      const agentPrompt = generateAgentPrompt(input, activeAgent);
+      
+      const response = await InvokeLLM({
+        prompt: agentPrompt,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            agent_response: { type: "string" },
+            next_agent: { type: "string", enum: ["collector", "validator", "documenter"] },
+            clarifying_questions: { 
+              type: "array", 
+              items: { type: "string" } 
+            },
+            requirement_extracted: { type: "boolean" },
+            requirement_data: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+                type: { type: "string", enum: ["functional", "non_functional", "business", "technical"] },
+                priority: { type: "string", enum: ["low", "medium", "high", "critical"] }
+              }
+            }
+          },
+          required: ["agent_response", "next_agent"]
+        }
+      });
+
+      // Add AI response
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: "ai",
+        agent: response.next_agent,
+        content: response.agent_response,
+        clarifying_questions: response.clarifying_questions || [],
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, aiMessage]);
+      setActiveAgent(response.next_agent);
+
+      // If requirement was extracted, save it
+      if (response.requirement_extracted && response.requirement_data && selectedProject) {
+        await Requirement.create({
+          ...response.requirement_data,
+          project_id: selectedProject.id,
+          stakeholder: "Virtual Meeting",
+          status: "clarified",
+          clarifying_questions: response.clarifying_questions || []
+        });
+
+        // Update project requirement count
+        await Project.update(selectedProject.id, {
+          requirements_count: (selectedProject.requirements_count || 0) + 1,
+          last_meeting_date: new Date().toISOString()
+        });
+      }
+
+      // Text-to-speech for accessibility
+      if ('speechSynthesis' in window && isSpeaking) {
+        const utterance = new SpeechSynthesisUtterance(response.agent_response);
+        utterance.rate = 0.9;
+        utterance.pitch = 1;
+        speechSynthesis.speak(utterance);
+      }
+
+    } catch (error) {
+      console.error("Error processing input:", error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: "ai",
+        agent: "system",
+        content: "I apologize, but I'm having trouble processing that request. Could you please try rephrasing it?",
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+
+    setIsProcessing(false);
+  };
+
+  const generateAgentPrompt = (userInput, currentAgent) => {
+    const context = `
+You are part of a 3-agent AI system for requirements gathering. Current active agent: ${currentAgent}.
+
+Agents:
+- collector: Captures requirements, asks clarifying questions, supports all users including non-technical
+- validator: Checks for conflicts, duplicates, validates against business rules
+- documenter: Structures requirements into proper format
+
+Current conversation context: ${messages.slice(-3).map(m => `${m.type}: ${m.content}`).join('\n')}
+
+User input: "${userInput}"
+
+As the ${currentAgent} agent, respond helpfully and determine which agent should handle the next interaction. Always be supportive of users who may not be technical. Ask clarifying questions to remove ambiguities. If you extract a clear requirement, mark requirement_extracted as true and provide the structured data.
+`;
+
+    return context;
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900 mb-2">Virtual Requirements Meeting</h1>
+            <p className="text-slate-600">AI-powered requirement gathering with real-time clarification</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsSpeaking(!isSpeaking)}
+              className={`${isSpeaking ? 'bg-blue-50 text-blue-600' : ''}`}
+            >
+              {isSpeaking ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </Button>
+            <AgentStatus activeAgent={activeAgent} />
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-4 gap-8">
+          {/* Main Chat Interface */}
+          <div className="lg:col-span-3">
+            <Card className="bg-white/90 backdrop-blur-sm border-slate-200/60 shadow-xl">
+              <CardHeader className="border-b border-slate-200/60">
+                <div className="flex justify-between items-center">
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-purple-600" />
+                    AI Meeting Room
+                  </CardTitle>
+                  {selectedProject && (
+                    <Badge className="bg-blue-100 text-blue-700">
+                      {selectedProject.name}
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              
+              <CardContent className="p-0">
+                {!sessionStarted ? (
+                  <div className="p-8 text-center">
+                    <div className="w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <Bot className="w-10 h-10 text-white" />
+                    </div>
+                    <h3 className="text-xl font-semibold text-slate-900 mb-4">Select a Project to Begin</h3>
+                    <div className="max-w-md mx-auto mb-6">
+                      <Select value={selectedProject?.id || ""} onValueChange={(value) => {
+                        const project = projects.find(p => p.id === value);
+                        setSelectedProject(project);
+                      }}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choose project..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {projects.map((project) => (
+                            <SelectItem key={project.id} value={project.id}>
+                              {project.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button 
+                      onClick={startSession}
+                      disabled={!selectedProject}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                    >
+                      Start Requirements Session
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <ChatInterface 
+                      messages={messages}
+                      isProcessing={isProcessing}
+                    />
+                    
+                    {/* Input Area */}
+                    <div className="border-t border-slate-200/60 p-6">
+                      <div className="flex items-center gap-4">
+                        <VoiceInput 
+                          onTranscript={processUserInput}
+                          isRecording={isRecording}
+                          setIsRecording={setIsRecording}
+                        />
+                        <div className="flex-1">
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Type your requirements, questions, or needs..."
+                              value={currentInput}
+                              onChange={(e) => setCurrentInput(e.target.value)}
+                              onKeyPress={(e) => e.key === 'Enter' && processUserInput(currentInput)}
+                              className="flex-1"
+                            />
+                            <Button
+                              onClick={() => processUserInput(currentInput)}
+                              disabled={isProcessing || !currentInput.trim()}
+                              className="bg-blue-600 hover:bg-blue-700"
+                            >
+                              <Send className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            <RequirementCapture selectedProject={selectedProject} />
+            
+            {/* Quick Actions */}
+            <Card className="bg-white/80 backdrop-blur-sm border-slate-200/60">
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold text-slate-700">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={() => processUserInput("I have a new functional requirement")}
+                >
+                  Add Functional Requirement
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={() => processUserInput("I need to specify a business rule")}
+                >
+                  Define Business Rule
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start"
+                  onClick={() => processUserInput("Let's review what we've captured so far")}
+                >
+                  Review Progress
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
