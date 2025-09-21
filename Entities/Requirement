@@ -1,0 +1,37 @@
+{
+  "name": "Requirement",
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Associated project ID"
+    },
+    "title": {
+      "type": "string",
+      "description": "Requirement title"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed requirement description"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "functional",
+        "non_functional",
+        "business",
+        "technical"
+      ],
+      "default": "functional",
+      "description": "Type of requirement"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "medium",
+ 
