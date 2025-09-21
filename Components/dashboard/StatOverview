@@ -1,0 +1,75 @@
+import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { 
+  FolderOpen, 
+  FileText, 
+  TrendingUp, 
+  Clock,
+  CheckCircle,
+  AlertTriangle
+} from "lucide-react";
+
+export default function StatsOverview({ projects, requirements, isLoading }) {
+  const totalRequirements = requirements.length;
+  const validatedRequirements = requirements.filter(r => r.status === 'validated' || r.status === 'approved').length;
+  const pendingRequirements = requirements.filter(r => r.status === 'draft').length;
+  const activeProjects = projects.filter(p => p.status === 'active').length;
+
+  const stats = [
+    {
+      title: "Active Projects",
+      value: activeProjects,
+      icon: FolderOpen,
+      gradient: "from-blue-500 to-cyan-500",
+      bgGradient: "from-blue-50 to-cyan-50"
+    },
+    {
+      title: "Total Requirements",
+      value: totalRequirements,
+      icon: FileText,
+      gradient: "from-purple-500 to-pink-500",
+      bgGradient: "from-purple-50 to-pink-50"
+    },
+    {
+      title: "Validated",
+      value: validatedRequirements,
+      icon: CheckCircle,
+      gradient: "from-green-500 to-emerald-500",
+      bgGradient: "from-green-50 to-emerald-50"
+    },
+    {
+      title: "Pending Review",
+      value: pendingRequirements,
+      icon: Clock,
+      gradient: "from-orange-500 to-red-500",
+      bgGradient: "from-orange-50 to-red-50"
+    }
+  ];
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {stats.map((stat, index) => (
+        <Card key={index} className={`bg-gradient-to-br ${stat.bgGradient} border-0 shadow-lg shadow-slate-200/20 hover:shadow-xl hover:shadow-slate-200/30 transition-all duration-200`}>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-600 mb-1">{stat.title}</p>
+                <p className="text-3xl font-bold text-slate-900">
+                  {isLoading ? (
+                    <div className="w-8 h-8 bg-slate-200 rounded animate-pulse"></div>
+                  ) : (
+                    stat.value
+                  )}
+                </p>
+              </div>
+              <div className={`w-12 h-12 bg-gradient-to-r ${stat.gradient} rounded-xl flex items-center justify-center shadow-lg`}>
+                <stat.icon className="w-6 h-6 text-white" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
