@@ -1,0 +1,37 @@
+{
+  "name": "Project",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Project name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Project description"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "on_hold"
+      ],
+      "default": "active",
+      "description": "Project status"
+    },
+    "requirements_count": {
+      "type": "number",
+      "default": 0,
+      "description": "Number of requirements gathered"
+    },
+    "last_meeting_date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last meeting date"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}
